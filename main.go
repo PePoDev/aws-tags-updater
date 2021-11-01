@@ -98,6 +98,7 @@ var rootCmd = &cobra.Command{
 					})
 					if err != nil {
 						logrus.Error("Could not create tags for instance", rows[i][identifier], err)
+						continue
 					}
 
 					if len(ec2deleteTags) > 0 {
@@ -107,8 +108,7 @@ var rootCmd = &cobra.Command{
 						})
 						if err != nil {
 							logrus.Error("Could not delete unused tags for instance", rows[i][identifier], err)
-						} else {
-							logrus.Info("Deleted", ec2deleteTags)
+							continue
 						}
 					}
 				case "Cloudwatch":
@@ -127,8 +127,11 @@ var rootCmd = &cobra.Command{
 					})
 					if err != nil {
 						logrus.Error("Could not create tags for instance", rows[i][identifier], err)
-						return
+						continue
 					}
+				default:
+					logrus.Error("Service type not supported", rows[i][service])
+					continue
 				}
 
 				logrus.Infof("Changed %s \t id: %20s \t %v", rows[i][service], rows[i][identifier], tags)
