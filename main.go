@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/rds"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -97,7 +98,7 @@ var rootCmd = &cobra.Command{
 						Tags:      ec2tags,
 					})
 					if err != nil {
-						logrus.Error("Could not create tags for instance", rows[i][identifier], err)
+						logrus.Errorf("Could not create tags for instance %v %v", rows[i][identifier], err)
 						continue
 					}
 
@@ -107,52 +108,65 @@ var rootCmd = &cobra.Command{
 							Tags:      ec2deleteTags,
 						})
 						if err != nil {
-							logrus.Error("Could not delete unused tags for instance", rows[i][identifier], err)
+							logrus.Errorf("Could not delete unused tags for instance %v %v", rows[i][identifier], err)
 							continue
 						}
 					}
 				case "CertificateManager":
-					fallthrough
 				case "CloudFormation":
-					fallthrough
 				case "CloudTrail":
-					fallthrough
 				case "Cloudwatch":
-					fallthrough
 				case "CodeArtifact":
-					fallthrough
 				case "Cognito":
-					fallthrough
 				case "ECS":
-					fallthrough
 				case "EFS":
-					fallthrough
 				case "EKS":
-					fallthrough
 				case "ElastiCache":
-					fallthrough
 				case "ElasticLoadBalancing":
-					fallthrough
 				case "ElasticLoadBalancingV2":
-					fallthrough
 				case "Events":
-					fallthrough
 				case "KMS":
-					fallthrough
 				case "Lambda":
-					fallthrough
+				case "RDS":
+					rdsTags := []*rds.Tag{}
+					rdsDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == "" {
+							rdsDeleteTags = append(rdsDeleteTags, aws.String(k))
+						} else {
+							rdsTags = append(rdsTags, &rds.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := rds.New(session)
+					_, err = svc.AddTagsToResource(&rds.AddTagsToResourceInput{
+						ResourceName: aws.String(rows[i][identifier]),
+						Tags:         rdsTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for RDS %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(rdsDeleteTags) > 0 {
+						_, err = svc.RemoveTagsFromResource(&rds.RemoveTagsFromResourceInput{
+							ResourceName: &rows[i][identifier],
+							TagKeys:      rdsDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for RDS %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "Route53Resolver":
-					fallthrough
 				case "S3":
-					fallthrough
 				case "SES":
-					fallthrough
 				case "SNS":
-					fallthrough
 				case "SSM":
-					fallthrough
 				default:
-					logrus.Error("Service type not supported", rows[i][service])
+					logrus.Error("Service type not supported ", rows[i][service])
 					continue
 				}
 
