@@ -3,7 +3,7 @@
 ## Installation
 
 ```sh
-wget https://github.com/PePoDev/aws-tags-updater/releases/download/v0.1.0/aws-tags-updater
+wget https://github.com/PePoDev/aws-tags-updater/releases/download/v0.2.0/aws-tags-updater
 chmod +x aws-tags-updater
 mv aws-tags-updater /usr/local/bin
 ```
