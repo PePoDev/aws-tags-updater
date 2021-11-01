@@ -111,24 +111,46 @@ var rootCmd = &cobra.Command{
 							continue
 						}
 					}
+				case "CertificateManager":
+					fallthrough
+				case "CloudFormation":
+					fallthrough
+				case "CloudTrail":
+					fallthrough
 				case "Cloudwatch":
-					ec2tags := []*ec2.Tag{}
-					for k, v := range tags {
-						ec2tags = append(ec2tags, &ec2.Tag{
-							Key:   aws.String(k),
-							Value: aws.String(v),
-						})
-					}
-
-					svc := ec2.New(session)
-					_, err := svc.CreateTags(&ec2.CreateTagsInput{
-						Resources: []*string{&rows[i][identifier]},
-						Tags:      ec2tags,
-					})
-					if err != nil {
-						logrus.Error("Could not create tags for instance", rows[i][identifier], err)
-						continue
-					}
+					fallthrough
+				case "CodeArtifact":
+					fallthrough
+				case "Cognito":
+					fallthrough
+				case "ECS":
+					fallthrough
+				case "EFS":
+					fallthrough
+				case "EKS":
+					fallthrough
+				case "ElastiCache":
+					fallthrough
+				case "ElasticLoadBalancing":
+					fallthrough
+				case "ElasticLoadBalancingV2":
+					fallthrough
+				case "Events":
+					fallthrough
+				case "KMS":
+					fallthrough
+				case "Lambda":
+					fallthrough
+				case "Route53Resolver":
+					fallthrough
+				case "S3":
+					fallthrough
+				case "SES":
+					fallthrough
+				case "SNS":
+					fallthrough
+				case "SSM":
+					fallthrough
 				default:
 					logrus.Error("Service type not supported", rows[i][service])
 					continue
