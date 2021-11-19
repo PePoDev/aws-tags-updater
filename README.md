@@ -32,3 +32,28 @@ Flags:
 ```
 
 > aws-tags-updater --file example.xlsx --sheet Sheet1 --column-tags-keys Name,Owner,Environment
+
+## Supported Services
+
+- EC2
+- CertificateManager
+- ~~CloudFormation~~
+- CloudTrail
+- Cloudwatch
+- CodeArtifact
+- Cognito
+- ECS
+- EFS
+- EKS
+- ElastiCache
+- ElasticLoadBalancing
+- ElasticLoadBalancingV2
+- Events
+- KMS
+- Lambda
+- RDS
+- Route53Resolver
+- S3
+- SES
+- SNS
+- SSM
