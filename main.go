@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/acm"
 	"github.com/aws/aws-sdk-go/service/ec2"
@@ -33,7 +32,6 @@ var rootCmd = &cobra.Command{
 		columnIdentifier := viper.GetString("column-identifier")
 		columnServiceType := viper.GetString("column-service-type")
 		tagsIgnoreValue := viper.GetString("tags-ignore-value")
-		awsProfile := viper.GetString("profile")
 
 		if debug {
 			logrus.SetLevel(logrus.DebugLevel)
@@ -52,10 +50,10 @@ var rootCmd = &cobra.Command{
 		sess, err := session.NewSession(&aws.Config{
 			Region:                        aws.String(region),
 			CredentialsChainVerboseErrors: aws.Bool(debug),
-			Credentials:                   credentials.NewSharedCredentials("", awsProfile),
 		})
 		if err != nil {
-			logrus.Fatalln("Credentials invalid:", err)
+			fmt.Println("Credentials invalid:", err)
+			return
 		}
 
 		stsSvc := sts.New(sess)
@@ -377,10 +375,9 @@ func init() {
 
 	rootCmd.PersistentFlags().StringP("file", "f", "", "File to open")
 	rootCmd.PersistentFlags().StringP("sheet", "s", "", "Sheet name")
-	rootCmd.PersistentFlags().StringP("profile", "p", "ap-southeast-1", "AWS Region")
 	rootCmd.PersistentFlags().StringP("region", "r", "ap-southeast-1", "AWS Region")
 	rootCmd.PersistentFlags().StringP("column-identifier", "i", "Identifier", "Column to read identifier")
-	rootCmd.PersistentFlags().StringP("column-tags-prefix", "c", "Tag:", "Column prefix to read as tags (Use with `column-tags-name`)")
+	rootCmd.PersistentFlags().StringP("column-tags-prefix", "p", "Tag:", "Column prefix to read as tags (Use with `column-tags-name`)")
 	rootCmd.PersistentFlags().StringSliceP("column-tags-keys", "n", []string{"Name"}, "Column name to get file to open")
 	rootCmd.PersistentFlags().StringP("column-service-type", "t", "Service", "Column to specific AWS service type")
 	rootCmd.PersistentFlags().String("tags-ignore-value", "(not tagged)", "Value to ignore in tag column")

@@ -4,6 +4,7 @@ go 1.17
 
 require (
 	github.com/aws/aws-sdk-go v1.41.13 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.11.1 // indirect
 	github.com/fsnotify/fsnotify v1.5.1 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
