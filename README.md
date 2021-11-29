@@ -35,25 +35,28 @@ Flags:
 
 ## Supported Services
 
+- S3
 - EC2
-- CertificateManager
-- ~~CloudFormation~~
-- CloudTrail
-- Cloudwatch
-- CodeArtifact
-- Cognito
+- RDS
+- EKS
+- SNS
+- KMS
 - ECS
 - EFS
-- EKS
+- Lambda
+- Cognito
+- CloudTrail
+- Cloudwatch
 - ElastiCache
+- CodeArtifact
+- Route53Resolver
+- Cloudwatch Events
+- CertificateManager
 - ElasticLoadBalancing
 - ElasticLoadBalancingV2
-- Events
-- KMS
-- Lambda
-- RDS
-- Route53Resolver
-- S3
-- SES
-- SNS
+
+## Unsupported Services
+
 - SSM
+- SES
+- CloudFormation

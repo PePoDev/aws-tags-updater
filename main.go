@@ -8,8 +8,23 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/acm"
+	"github.com/aws/aws-sdk-go/service/cloudtrail"
+	"github.com/aws/aws-sdk-go/service/cloudwatch"
+	"github.com/aws/aws-sdk-go/service/cloudwatchevents"
+	"github.com/aws/aws-sdk-go/service/codeartifact"
+	"github.com/aws/aws-sdk-go/service/cognitoidentity"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go/service/efs"
+	"github.com/aws/aws-sdk-go/service/eks"
+	"github.com/aws/aws-sdk-go/service/elasticache"
+	"github.com/aws/aws-sdk-go/service/elbv2"
+	elb "github.com/aws/aws-sdk-go/service/elbv2"
+	"github.com/aws/aws-sdk-go/service/kms"
+	"github.com/aws/aws-sdk-go/service/lambda"
 	"github.com/aws/aws-sdk-go/service/rds"
+	"github.com/aws/aws-sdk-go/service/route53resolver"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sns"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/sirupsen/logrus"
@@ -23,6 +38,7 @@ var rootCmd = &cobra.Command{
 	Short: "AWS Tags Updater - Sync tags with all resources via sheet",
 	Run: func(cmd *cobra.Command, args []string) {
 		debug := viper.GetBool("debug")
+		trace := viper.GetBool("trace")
 		fileName := viper.GetString("file")
 		sheetName := viper.GetString("sheet")
 		region := viper.GetString("region")
@@ -32,9 +48,14 @@ var rootCmd = &cobra.Command{
 		columnIdentifier := viper.GetString("column-identifier")
 		columnServiceType := viper.GetString("column-service-type")
 		tagsIgnoreValue := viper.GetString("tags-ignore-value")
+		deleteTagValue := ""
 
 		if debug {
 			logrus.SetLevel(logrus.DebugLevel)
+		}
+
+		if trace {
+			logrus.SetLevel(logrus.TraceLevel)
 		}
 
 		file, err := excelize.OpenFile(fileName)
@@ -52,8 +73,7 @@ var rootCmd = &cobra.Command{
 			CredentialsChainVerboseErrors: aws.Bool(debug),
 		})
 		if err != nil {
-			fmt.Println("Credentials invalid:", err)
-			return
+			logrus.Fatalln("Credentials invalid: ", err)
 		}
 
 		stsSvc := sts.New(sess)
@@ -63,13 +83,13 @@ var rootCmd = &cobra.Command{
 			logrus.WithError(err).Fatal("failed to call stsSvc")
 		}
 		accountId := *result.Account
-		logrus.Infof("AWS Account id: %s", accountId)
+		logrus.Debugf("AWS Account id: %s", accountId)
 
 		var tagsFilter []string
 		for _, v := range columnTagKeys {
 			tagsFilter = append(tagsFilter, fmt.Sprintf("%s %s", columnTagPrefix, v))
 		}
-		logrus.Infof("Tags name to filter: [%v]", strings.Join(tagsFilter, ", "))
+		logrus.Debugf("Tags name to filter: [%v]", strings.Join(tagsFilter, ", "))
 
 		var tagsFillterIds []int
 		var identifier int
@@ -78,19 +98,19 @@ var rootCmd = &cobra.Command{
 			for j, value := range row {
 				if i == 0 {
 					if value == columnIdentifier {
-						logrus.Infof("Found column identifier [%s] at column [%d]", value, j)
+						logrus.Debugf("Found column identifier [%s] at column [%d]", value, j)
 						identifier = j
 					}
 					if contains(tagsFilter, value) {
-						logrus.Infof("Found tags fillter [%s] at column [%d]", value, j)
+						logrus.Debugf("Found tags fillter [%s] at column [%d]", value, j)
 						tagsFillterIds = append(tagsFillterIds, j)
 					}
 					if value == columnServiceType {
-						logrus.Infof("Found column service type [%s] at column [%d]", value, j)
+						logrus.Debugf("Found column service type [%s] at column [%d]", value, j)
 						service = j
 					}
 				}
-				logrus.Debugf("row %d, column %d = %s", i, j, value)
+				logrus.Tracef("row %d, column %d = %s", i, j, value)
 			}
 
 			if i > 0 {
@@ -106,7 +126,7 @@ var rootCmd = &cobra.Command{
 					ec2tags := []*ec2.Tag{}
 					ec2deleteTags := []*ec2.Tag{}
 					for k, v := range tags {
-						if v == "" {
+						if v == deleteTagValue {
 							ec2deleteTags = append(ec2deleteTags, &ec2.Tag{
 								Key: aws.String(k),
 							})
@@ -142,7 +162,7 @@ var rootCmd = &cobra.Command{
 					acmTags := []*acm.Tag{}
 					acmDeleteTags := []*acm.Tag{}
 					for k, v := range tags {
-						if v == "" {
+						if v == deleteTagValue {
 							acmDeleteTags = append(acmDeleteTags, &acm.Tag{
 								Key: aws.String(k),
 							})
@@ -176,77 +196,436 @@ var rootCmd = &cobra.Command{
 						}
 					}
 				case "CloudFormation":
-					// newTags := []*cloudformation.Tag{}
-					// for k, v := range tags {
-					// 	if v == "" {
-					// 		newTags = append(newTags, &cloudformation.Tag{
-					// 			Key:   aws.String(k),
-					// 			Value: aws.String(""),
-					// 		})
-					// 	} else {
-					// 		newTags = append(newTags, &cloudformation.Tag{
-					// 			Key:   aws.String(k),
-					// 			Value: aws.String(v),
-					// 		})
-					// 	}
-					// }
-
-					// svc := cloudformation.New(sess)
-					// _, err := svc.UpdateStack(&cloudformation.UpdateStackInput{
-					// 	StackName:           &rows[i][identifier],
-					// 	UsePreviousTemplate: aws.Bool(true),
-					// 	Tags:                newTags,
-					// })
-					// if err != nil {
-					// 	logrus.Errorf("Could not create tags for CloudFormation %v %v", rows[i][identifier], err)
-					// 	continue
-					// }
 					logrus.Errorf("CloudFormation Not Implemented")
 					continue
 				case "CloudTrail":
-					logrus.Errorf("CloudTrail Not Implemented")
-					continue
+					cloudtrailTags := []*cloudtrail.Tag{}
+					cloudtrailDeleteTags := []*cloudtrail.Tag{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							cloudtrailDeleteTags = append(cloudtrailDeleteTags, &cloudtrail.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						} else {
+							cloudtrailTags = append(cloudtrailTags, &cloudtrail.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := cloudtrail.New(sess)
+					_, err = svc.AddTags(&cloudtrail.AddTagsInput{
+						ResourceId: aws.String(rows[i][identifier]),
+						TagsList:   cloudtrailTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for Cloud Trail %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(cloudtrailDeleteTags) > 0 {
+						_, err = svc.RemoveTags(&cloudtrail.RemoveTagsInput{
+							ResourceId: aws.String(rows[i][identifier]),
+							TagsList:   cloudtrailDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for Cloud Trail %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "Cloudwatch":
-					logrus.Errorf("Cloudwatch Not Implemented")
-					continue
+					cloudWatchTags := []*cloudwatch.Tag{}
+					cloudWatchDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							cloudWatchDeleteTags = append(cloudWatchDeleteTags, aws.String(k))
+						} else {
+							cloudWatchTags = append(cloudWatchTags, &cloudwatch.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := cloudwatch.New(sess)
+					_, err = svc.TagResource(&cloudwatch.TagResourceInput{
+						ResourceARN: aws.String(rows[i][identifier]),
+						Tags:        cloudWatchTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for Cloud Watch %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(cloudWatchDeleteTags) > 0 {
+						_, err = svc.UntagResource(&cloudwatch.UntagResourceInput{
+							ResourceARN: aws.String(rows[i][identifier]),
+							TagKeys:     cloudWatchDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for Cloud Watch %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "CodeArtifact":
-					logrus.Errorf("CodeArtifact Not Implemented")
-					continue
+					codeArtifactTags := []*codeartifact.Tag{}
+					codeArtifactDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							codeArtifactDeleteTags = append(codeArtifactDeleteTags, aws.String(k))
+						} else {
+							codeArtifactTags = append(codeArtifactTags, &codeartifact.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := codeartifact.New(sess)
+					_, err = svc.TagResource(&codeartifact.TagResourceInput{
+						ResourceArn: aws.String(rows[i][identifier]),
+						Tags:        codeArtifactTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for Code Artifact %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(codeArtifactDeleteTags) > 0 {
+						_, err = svc.UntagResource(&codeartifact.UntagResourceInput{
+							ResourceArn: aws.String(rows[i][identifier]),
+							TagKeys:     codeArtifactDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for Code Artifact %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "Cognito":
-					logrus.Errorf("Cognito Not Implemented")
-					continue
+					cognitoTags := map[string]*string{}
+					cognitoDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							cognitoDeleteTags = append(cognitoDeleteTags, aws.String(k))
+						} else {
+							cognitoTags[k] = aws.String(v)
+						}
+					}
+					svc := cognitoidentity.New(sess)
+					_, err = svc.TagResource(&cognitoidentity.TagResourceInput{
+						ResourceArn: aws.String(rows[i][identifier]),
+						Tags:        cognitoTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for Cognito %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(cognitoDeleteTags) > 0 {
+						_, err = svc.UntagResource(&cognitoidentity.UntagResourceInput{
+							ResourceArn: aws.String(rows[i][identifier]),
+							TagKeys:     cognitoDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for Cognito %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "ECS":
-					logrus.Errorf("ECS Not Implemented")
-					continue
+					ecsTags := []*ecs.Tag{}
+					ecsDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							ecsDeleteTags = append(ecsDeleteTags, aws.String(k))
+						} else {
+							ecsTags = append(ecsTags, &ecs.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := ecs.New(sess)
+					_, err = svc.TagResource(&ecs.TagResourceInput{
+						ResourceArn: aws.String(rows[i][identifier]),
+						Tags:        ecsTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for ECS %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(ecsDeleteTags) > 0 {
+						_, err = svc.UntagResource(&ecs.UntagResourceInput{
+							ResourceArn: aws.String(rows[i][identifier]),
+							TagKeys:     ecsDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for ECS %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "EFS":
-					logrus.Errorf("EFS Not Implemented")
-					continue
+					efsTags := []*efs.Tag{}
+					efsDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							efsDeleteTags = append(efsDeleteTags, aws.String(k))
+						} else {
+							efsTags = append(efsTags, &efs.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := efs.New(sess)
+					_, err = svc.TagResource(&efs.TagResourceInput{
+						ResourceId: aws.String(rows[i][identifier]),
+						Tags:       efsTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for EFS %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(efsDeleteTags) > 0 {
+						_, err = svc.UntagResource(&efs.UntagResourceInput{
+							ResourceId: aws.String(rows[i][identifier]),
+							TagKeys:    efsDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for EFS %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "EKS":
-					logrus.Errorf("EKS Not Implemented")
-					continue
+					eksTags := map[string]*string{}
+					eksDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							eksDeleteTags = append(eksDeleteTags, aws.String(k))
+						} else {
+							eksTags[k] = aws.String(v)
+						}
+					}
+					svc := eks.New(sess)
+					_, err = svc.TagResource(&eks.TagResourceInput{
+						ResourceArn: aws.String(rows[i][identifier]),
+						Tags:        eksTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for EKS %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(eksDeleteTags) > 0 {
+						_, err = svc.UntagResource(&eks.UntagResourceInput{
+							ResourceArn: aws.String(rows[i][identifier]),
+							TagKeys:     eksDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for EKS %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "ElastiCache":
-					logrus.Errorf("ElastiCache Not Implemented")
-					continue
+					elasticacheTags := []*elasticache.Tag{}
+					elasticacheDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							elasticacheDeleteTags = append(elasticacheDeleteTags, aws.String(k))
+						} else {
+							elasticacheTags = append(elasticacheTags, &elasticache.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := elasticache.New(sess)
+					_, err = svc.AddTagsToResource(&elasticache.AddTagsToResourceInput{
+						ResourceName: aws.String(rows[i][identifier]),
+						Tags:         elasticacheTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for Elasticache %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(elasticacheDeleteTags) > 0 {
+						_, err = svc.RemoveTagsFromResource(&elasticache.RemoveTagsFromResourceInput{
+							ResourceName: aws.String(rows[i][identifier]),
+							TagKeys:      elasticacheDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for Elasticache %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "ElasticLoadBalancing":
-					logrus.Errorf("ElasticLoadBalancing Not Implemented")
-					continue
+					elbTags := []*elb.Tag{}
+					elbDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							elbDeleteTags = append(elbDeleteTags, aws.String(k))
+						} else {
+							elbTags = append(elbTags, &elb.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := elb.New(sess)
+					_, err = svc.AddTags(&elb.AddTagsInput{
+						ResourceArns: aws.StringSlice([]string{rows[i][identifier]}),
+						Tags:         elbTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for Elastic Load Balancing %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(elbDeleteTags) > 0 {
+						_, err = svc.RemoveTags(&elb.RemoveTagsInput{
+							ResourceArns: aws.StringSlice([]string{rows[i][identifier]}),
+							TagKeys:      elbDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for Elastic Load Balancing %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "ElasticLoadBalancingV2":
-					logrus.Errorf("ElasticLoadBalancingV2 Not Implemented")
-					continue
+					elbv2Tags := []*elbv2.Tag{}
+					elbv2DeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							elbv2DeleteTags = append(elbv2DeleteTags, aws.String(k))
+						} else {
+							elbv2Tags = append(elbv2Tags, &elbv2.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := elbv2.New(sess)
+					_, err = svc.AddTags(&elbv2.AddTagsInput{
+						ResourceArns: aws.StringSlice([]string{rows[i][identifier]}),
+						Tags:         elbv2Tags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for Elastic Load Balancing V2 %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(elbv2DeleteTags) > 0 {
+						_, err = svc.RemoveTags(&elbv2.RemoveTagsInput{
+							ResourceArns: aws.StringSlice([]string{rows[i][identifier]}),
+							TagKeys:      elbv2DeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for Elastic Load Balancing V2 %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "Events":
-					logrus.Errorf("Events Not Implemented")
-					continue
+					cloudwatchEventsTags := []*cloudwatchevents.Tag{}
+					cloudwatchEventsDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							cloudwatchEventsDeleteTags = append(cloudwatchEventsDeleteTags, aws.String(k))
+						} else {
+							cloudwatchEventsTags = append(cloudwatchEventsTags, &cloudwatchevents.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := cloudwatchevents.New(sess)
+					_, err = svc.TagResource(&cloudwatchevents.TagResourceInput{
+						ResourceARN: aws.String(rows[i][identifier]),
+						Tags:        cloudwatchEventsTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for Cloudwatch Events %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(cloudwatchEventsDeleteTags) > 0 {
+						_, err = svc.UntagResource(&cloudwatchevents.UntagResourceInput{
+							ResourceARN: &rows[i][identifier],
+							TagKeys:     cloudwatchEventsDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for Cloudwatch Events %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "KMS":
-					logrus.Errorf("KMS Not Implemented")
-					continue
+					kmsTags := []*kms.Tag{}
+					kmsDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							kmsDeleteTags = append(kmsDeleteTags, aws.String(k))
+						} else {
+							kmsTags = append(kmsTags, &kms.Tag{
+								TagKey:   aws.String(k),
+								TagValue: aws.String(v),
+							})
+						}
+					}
+					svc := kms.New(sess)
+					_, err = svc.TagResource(&kms.TagResourceInput{
+						KeyId: aws.String(rows[i][identifier]),
+						Tags:  kmsTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for KMS %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(kmsDeleteTags) > 0 {
+						_, err = svc.UntagResource(&kms.UntagResourceInput{
+							KeyId:   &rows[i][identifier],
+							TagKeys: kmsDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for KMS %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "Lambda":
-					logrus.Errorf("Lambda Not Implemented")
-					continue
+					lambdaTags := map[string]*string{}
+					lambdaDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							lambdaDeleteTags = append(lambdaDeleteTags, aws.String(k))
+						} else {
+							lambdaTags[k] = aws.String(v)
+						}
+					}
+					svc := lambda.New(sess)
+					_, err = svc.TagResource(&lambda.TagResourceInput{
+						Resource: aws.String(rows[i][identifier]),
+						Tags:     lambdaTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for Lambda %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(lambdaDeleteTags) > 0 {
+						_, err = svc.UntagResource(&lambda.UntagResourceInput{
+							Resource: &rows[i][identifier],
+							TagKeys:  lambdaDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for Lambda %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "RDS":
 					rdsTags := []*rds.Tag{}
 					rdsDeleteTags := []*string{}
 					for k, v := range tags {
-						if v == "" {
+						if v == deleteTagValue {
 							rdsDeleteTags = append(rdsDeleteTags, aws.String(k))
 						} else {
 							rdsTags = append(rdsTags, &rds.Tag{
@@ -276,11 +655,67 @@ var rootCmd = &cobra.Command{
 						}
 					}
 				case "Route53Resolver":
-					logrus.Errorf("Route53Resolver Not Implemented")
-					continue
+					route53resolverTags := []*route53resolver.Tag{}
+					route53resolverDeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							route53resolverDeleteTags = append(route53resolverDeleteTags, aws.String(k))
+						} else {
+							route53resolverTags = append(route53resolverTags, &route53resolver.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := route53resolver.New(sess)
+					_, err = svc.TagResource(&route53resolver.TagResourceInput{
+						ResourceArn: aws.String(rows[i][identifier]),
+						Tags:        route53resolverTags,
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for Route53Resolver %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(route53resolverDeleteTags) > 0 {
+						_, err = svc.UntagResource(&route53resolver.UntagResourceInput{
+							ResourceArn: &rows[i][identifier],
+							TagKeys:     route53resolverDeleteTags,
+						})
+						if err != nil {
+							logrus.Errorf("Could not delete unused tags for Route53Resolver %v %v", rows[i][identifier], err)
+							continue
+						}
+					}
 				case "S3":
-					logrus.Errorf("S3 Not Implemented")
-					continue
+					s3Tags := []*s3.Tag{}
+					s3DeleteTags := []*string{}
+					for k, v := range tags {
+						if v == deleteTagValue {
+							s3DeleteTags = append(s3DeleteTags, aws.String(k))
+						} else {
+							s3Tags = append(s3Tags, &s3.Tag{
+								Key:   aws.String(k),
+								Value: aws.String(v),
+							})
+						}
+					}
+					svc := s3.New(sess)
+					_, err = svc.PutBucketTagging(&s3.PutBucketTaggingInput{
+						Bucket: aws.String(rows[i][identifier]),
+						Tagging: &s3.Tagging{
+							TagSet: s3Tags,
+						},
+					})
+					if err != nil {
+						logrus.Errorf("Could not create tags for S3 %v %v", rows[i][identifier], err)
+						continue
+					}
+
+					if len(s3DeleteTags) > 0 {
+						logrus.Errorf("Can't delete unused tags for S3 %v %v", rows[i][identifier], err)
+						continue
+					}
 				case "SES":
 					logrus.Errorf("SES Not Implemented")
 					continue
@@ -288,7 +723,7 @@ var rootCmd = &cobra.Command{
 					snsTags := []*sns.Tag{}
 					snsDeleteTags := []*string{}
 					for k, v := range tags {
-						if v == "" {
+						if v == deleteTagValue {
 							snsDeleteTags = append(snsDeleteTags, aws.String(k))
 						} else {
 							snsTags = append(snsTags, &sns.Tag{
@@ -318,39 +753,6 @@ var rootCmd = &cobra.Command{
 						}
 					}
 				case "SSM":
-					// ssmTags := []*ssm.Tag{}
-					// ssmDeleteTags := []*string{}
-					// for k, v := range tags {
-					// 	if v == "" {
-					// 		ssmDeleteTags = append(ssmDeleteTags, aws.String(k))
-					// 	} else {
-					// 		ssmTags = append(ssmTags, &ssm.Tag{
-					// 			Key:   aws.String(k),
-					// 			Value: aws.String(v),
-					// 		})
-					// 	}
-					// }
-					// svc := ssm.New(sess)
-					// _, err = svc.AddTagsToResource(&ssm.AddTagsToResourceInput{
-					// 	ResourceId: aws.String(rows[i][identifier]),
-					// 	// ResourceType: aws.String(""),
-					// 	Tags: ssmTags,
-					// })
-					// if err != nil {
-					// 	logrus.Errorf("Could not create tags for SSM %v %v", rows[i][identifier], err)
-					// 	continue
-					// }
-
-					// if len(ssmDeleteTags) > 0 {
-					// 	_, err = svc.RemoveTagsFromResource(&ssm.RemoveTagsFromResourceInput{
-					// 		ResourceId: &rows[i][identifier],
-					// 		TagKeys:    ssmDeleteTags,
-					// 	})
-					// 	if err != nil {
-					// 		logrus.Errorf("Could not delete unused tags for SSM %v %v", rows[i][identifier], err)
-					// 		continue
-					// 	}
-					// }
 					logrus.Errorf("SSM Not Implemented")
 					continue
 				default:
@@ -382,6 +784,7 @@ func init() {
 	rootCmd.PersistentFlags().StringP("column-service-type", "t", "Service", "Column to specific AWS service type")
 	rootCmd.PersistentFlags().String("tags-ignore-value", "(not tagged)", "Value to ignore in tag column")
 	rootCmd.PersistentFlags().Bool("debug", false, "Enable debug mode")
+	rootCmd.PersistentFlags().Bool("trace", false, "Enable trace mode")
 	viper.BindPFlags(rootCmd.PersistentFlags())
 }
 
